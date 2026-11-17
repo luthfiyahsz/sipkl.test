@@ -1,0 +1,117 @@
+name: si-pkl
+
+# ---------------------------------------------------------------------------
+# Stack produksi SI-PKL: Next.js (app) + MySQL 8.0 + migrasi otomatis.
+#
+# Penggunaan:
+#   cp .env.example .env   # sesuaikan nilainya
+#   docker compose up -d --build
+#   docker compose --profile seed run --rm seed   # opsional, isi data demo
+# ---------------------------------------------------------------------------
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: si-pkl-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-si_pkl}
+      MYSQL_USER: ${MYSQL_USER:-si_pkl}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD wajib diisi di .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD wajib diisi di .env}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - internal
+
+  migrator:
+    build:
+      context: .
+      target: migrator
+    image: si-pkl-migrator:latest
+    container_name: si-pkl-migrator
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL wajib diisi di .env}
+      NODE_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # Profil opsional agar seed tidak berjalan otomatis di setiap deploy.
+  seed:
+    profiles: ["seed"]
+    build:
+      context: .
+      target: migrator
+    image: si-pkl-migrator:latest
+    container_name: si-pkl-seed
+    restart: "no"
+    command: ["npx", "prisma", "db", "seed"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL wajib diisi di .env}
+      NODE_ENV: production
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - internal
+
+  app:
+    build:
+      context: .
+      target: runner
+    image: si-pkl-app:latest
+    container_name: si-pkl-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL wajib diisi di .env}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "127.0.0.1:9003:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - internal
+
+volumes:
+  mysql-data:
+    name: si-pkl-mysql-data
+  uploads:
+    name: si-pkl-uploads
+
+networks:
+  internal:
+    name: si-pkl-internal
+    driver: bridge

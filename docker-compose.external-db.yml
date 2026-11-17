@@ -1,0 +1,90 @@
+name: si-pkl
+
+# ---------------------------------------------------------------------------
+# Varian untuk memakai container MySQL yang SUDAH ADA (mis. si_pkl_mysql).
+#
+# 1. Cari nama network container MySQL lama:
+#      docker inspect si_pkl_mysql \
+#        --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'
+#
+# 2. Isi di .env (atau export sebelum menjalankan compose):
+#      EXTERNAL_DB_NETWORK=nama_network_tersebut
+#      EXTERNAL_DATABASE_URL=mysql://user:password@si_pkl_mysql:3306/si_pkl
+#
+# 3. Jalankan:
+#      docker compose -f docker-compose.external-db.yml up -d --build
+#      docker compose -f docker-compose.external-db.yml --profile seed run --rm seed
+#
+# File ini sengaja berdiri sendiri (bukan override) agar service MySQL lokal
+# tidak ikut dibuat.
+# ---------------------------------------------------------------------------
+
+services:
+  migrator:
+    build:
+      context: .
+      target: migrator
+    image: si-pkl-migrator:latest
+    container_name: si-pkl-migrator
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${EXTERNAL_DATABASE_URL:?EXTERNAL_DATABASE_URL wajib diisi}
+      NODE_ENV: production
+    networks:
+      - external-db
+
+  seed:
+    profiles: ["seed"]
+    build:
+      context: .
+      target: migrator
+    image: si-pkl-migrator:latest
+    container_name: si-pkl-seed
+    restart: "no"
+    command: ["npx", "prisma", "db", "seed"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${EXTERNAL_DATABASE_URL:?EXTERNAL_DATABASE_URL wajib diisi}
+      NODE_ENV: production
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - external-db
+
+  app:
+    build:
+      context: .
+      target: runner
+    image: si-pkl-app:latest
+    container_name: si-pkl-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${EXTERNAL_DATABASE_URL:?EXTERNAL_DATABASE_URL wajib diisi}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "127.0.0.1:9003:3000"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - external-db
+
+volumes:
+  uploads:
+    name: si-pkl-uploads
+
+networks:
+  external-db:
+    external: true
+    name: ${EXTERNAL_DB_NETWORK:?EXTERNAL_DB_NETWORK wajib diisi}

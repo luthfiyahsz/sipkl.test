@@ -1,0 +1,204 @@
+// Prisma schema for SI-PKL (migrated from Laravel)
+// Database: MySQL 8.0
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  siswa
+  guru
+  perusahaan
+}
+
+enum PklStatus {
+  pengajuan
+  disetujui
+  ditolak
+  selesai
+}
+
+enum ApprovalStatus {
+  pending
+  disetujui
+  ditolak
+}
+
+enum AbsensiStatus {
+  hadir
+  sakit
+  izin
+  alpha
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  name            String    @db.VarChar(255)
+  email           String    @unique @db.VarChar(255)
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  password        String    @db.VarChar(255)
+  role            Role      @default(siswa)
+  foto            String?   @db.VarChar(255)
+  noTelp          String?   @map("no_telp") @db.VarChar(20)
+  alamat          String?   @db.Text
+  active          Boolean   @default(true)
+  rememberToken   String?   @map("remember_token") @db.VarChar(100)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  siswa      Siswa?
+  guru       Guru?
+  perusahaan Perusahaan?
+
+  @@index([role])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  email     String    @id @db.VarChar(255)
+  token     String    @db.VarChar(255)
+  createdAt DateTime? @map("created_at")
+
+  @@map("password_reset_tokens")
+}
+
+model Siswa {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique @map("user_id")
+  nis       String   @unique @db.VarChar(20)
+  kelas     String?  @db.VarChar(10)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pkls     Pkl[]     @relation("PklSiswa")
+  absensis Absensi[]
+
+  @@map("siswas")
+}
+
+model Guru {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique @map("user_id")
+  nip       String   @unique @db.VarChar(20)
+  gelar     String?  @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pkls       Pkl[]       @relation("PklGuru")
+  penilaians Penilaian[] @relation("PenilaianGuru")
+
+  @@map("gurus")
+}
+
+model Perusahaan {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique @map("user_id")
+  kontakPerson String?  @map("kontak_person") @db.VarChar(100)
+  website      String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pkls       Pkl[]       @relation("PklPerusahaan")
+  penilaians Penilaian[] @relation("PenilaianPerusahaan")
+
+  @@map("perusahaans")
+}
+
+model Pkl {
+  id             Int       @id @default(autoincrement())
+  siswaId        Int       @map("siswa_id")
+  guruId         Int?      @map("guru_id")
+  perusahaanId   Int?      @map("perusahaan_id")
+  judul          String    @db.VarChar(255)
+  deskripsi      String?   @db.Text
+  tanggalMulai   DateTime? @map("tanggal_mulai") @db.Date
+  tanggalSelesai DateTime? @map("tanggal_selesai") @db.Date
+  status         PklStatus @default(pengajuan)
+  laporanAkhir   String?   @map("laporan_akhir") @db.VarChar(255)
+  catatan        String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  siswa      Siswa       @relation("PklSiswa", fields: [siswaId], references: [id], onDelete: Cascade)
+  guru       Guru?       @relation("PklGuru", fields: [guruId], references: [id], onDelete: SetNull)
+  perusahaan Perusahaan? @relation("PklPerusahaan", fields: [perusahaanId], references: [id], onDelete: SetNull)
+  jurnals    Jurnal[]
+  penilaians Penilaian[]
+
+  @@index([siswaId])
+  @@index([guruId])
+  @@index([perusahaanId])
+  @@index([status])
+  @@map("pkls")
+}
+
+model Jurnal {
+  id                 Int            @id @default(autoincrement())
+  pklId              Int            @map("pkl_id")
+  tanggal            DateTime       @db.Date
+  kegiatan           String         @db.Text
+  dokumentasi        String?        @db.VarChar(255)
+  komentarDosen      String?        @map("komentar_dosen") @db.Text
+  komentarPerusahaan String?        @map("komentar_perusahaan") @db.Text
+  statusDosen        ApprovalStatus @default(pending) @map("status_dosen")
+  statusPerusahaan   ApprovalStatus @default(pending) @map("status_perusahaan")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  pkl Pkl @relation(fields: [pklId], references: [id], onDelete: Cascade)
+
+  @@index([pklId])
+  @@index([statusDosen])
+  @@index([statusPerusahaan])
+  @@map("jurnals")
+}
+
+model Absensi {
+  id         Int           @id @default(autoincrement())
+  siswaId    Int           @map("siswa_id")
+  tanggal    DateTime      @db.Date
+  status     AbsensiStatus @default(hadir)
+  keterangan String?       @db.Text
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  siswa Siswa @relation(fields: [siswaId], references: [id], onDelete: Cascade)
+
+  @@unique([siswaId, tanggal])
+  @@index([tanggal])
+  @@map("absensis")
+}
+
+model Penilaian {
+  id                Int      @id @default(autoincrement())
+  pklId             Int      @map("pkl_id")
+  guruId            Int?     @map("guru_id")
+  perusahaanId      Int?     @map("perusahaan_id")
+  nilaiKedisiplinan Int?     @map("nilai_kedisiplinan")
+  nilaiKerjasama    Int?     @map("nilai_kerjasama")
+  nilaiPengetahuan  Int?     @map("nilai_pengetahuan")
+  nilaiKeterampilan Int?     @map("nilai_keterampilan")
+  nilaiLaporan      Int?     @map("nilai_laporan")
+  totalNilai        Int?     @map("total_nilai")
+  komentar          String?  @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  pkl        Pkl         @relation(fields: [pklId], references: [id], onDelete: Cascade)
+  guru       Guru?       @relation("PenilaianGuru", fields: [guruId], references: [id], onDelete: SetNull)
+  perusahaan Perusahaan? @relation("PenilaianPerusahaan", fields: [perusahaanId], references: [id], onDelete: SetNull)
+
+  @@index([pklId])
+  @@index([guruId])
+  @@index([perusahaanId])
+  @@map("penilaians")
+}
